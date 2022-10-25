@@ -1,3 +1,7 @@
+from tabulate import tabulate
+
+#python -m pip install tabulate
+
 class Memoria:
     tamano = 530
     
@@ -15,16 +19,17 @@ class Memoria:
                 break
 
     def asignarParticion(self):
-        global cola_nuevos
+        global cola_listos_susp
         global cola_memoria
         global so
+        global cpu
         proc_asignados = []
 
-        for n in range(0,len(cola_nuevos)):
+        for n in range(0,len(cola_listos_susp)):
             if not (self.particiones[1].Disponible()) and not (self.particiones[2].Disponible()) and not (self.particiones[3].Disponible()):
                 break
             else:
-                proc = cola_nuevos[n]
+                proc = cola_listos_susp[n]
                 worst = 0
                 entro = False
                 for i in range(1,len(self.particiones)):
@@ -43,15 +48,13 @@ class Memoria:
                     cola_memoria.append(proc)
                     proc_asignados.append(proc)
 
-        if len(cola_nuevos) > 0:
+        if len(cola_listos_susp) > 0:
             for p in range(1,len(self.particiones)):
                 if self.particiones[p].Disponible():
                         self.particiones[p].fragExterna()
 
         for i in proc_asignados:
-            cola_nuevos.remove(i)
-
-        so.imprimirEvento()
+            cola_listos_susp.remove(i)
 
 
 class Proceso:
@@ -64,26 +67,27 @@ class Proceso:
 
     def ejecutar(self):
         self.ti = self.ti - 1
-        if self.ti == 0:
-            self.terminar()
 
     def terminar(self):
-        global cola_listos
-        global cola_nuevos
+        global cola_plan_ejec
+        global cola_listos_susp
         global cola_memoria
         global memoria
         global cpu
-        
+        global proc_terminados
+
         #Elimina de todas las colas al proceso
-        if self in cola_listos:
-            cola_listos.remove(self)
-        if self in cola_nuevos:
-            cola_nuevos.remove(self)
+        if self in cola_plan_ejec:
+            cola_plan_ejec.remove(self)
+        if self in cola_listos_susp:
+            cola_listos_susp.remove(self)
         if self in cola_memoria:
             cola_memoria.remove(self)
 
+        if self not in proc_terminados:
+            proc_terminados.append(self)
         memoria.liberarParticion(self.idProceso)
-        cpu.terminarProceso()
+        #Cuando un proceso se termina de ejecutar, imprimimos por pantalla ese evento, después, en el mismo instante imprimimos la entrada de un nuevo proceso a memoria
         
 
 # 1,2,3,4,5
@@ -126,53 +130,63 @@ class CPU:
 
     def ejecutar(self):
         global cola_memoria
-        global cola_listos
+        global cola_plan_ejec
         global so
 
-        if len(cola_listos) > 0:
-            proceso = cola_listos[0]
+        if len(cola_plan_ejec) > 0:
+            proceso = cola_plan_ejec[0]
             if proceso not in cola_memoria:
                 so.PlanificadorMP(proceso)
             if self.proc_ejec == None:
                 self.proc_ejec = proceso
-            proceso.ejecutar()
+                so.obtenerEvento()
+                so.imprimirEventoConsola()
+            if self.proc_ejec.ti == 0:
+                so.obtenerEvento()
+                so.imprimirEventoConsola()
+                self.terminarProceso()
+            if self.proc_ejec != None:
+                self.proc_ejec.ejecutar()  
 
     def terminarProceso(self):
+        self.proc_ejec.terminar()
         self.proc_ejec = None
-        
 
 class SistemaOperativo:
 
     tamano = 100
-    instante = 2
+    instante = 1
 
     def incrementarInstante(self):
         self.instante = self.instante + 1
 
     def PlanificadorLP(self):
-        global cola_nuevos
+        global cola_listos_susp
         global cola_memoria
-        global proc_na
-        global remanentes
+        global cola_all_process
+        global cola_nuevos
 
-        for p in range(0,len(proc_na)):
-            if (len(cola_nuevos) + len(cola_memoria)) == 5: # NIVEL DE MULTIPROGRAMACIÓN
-                for r in range(p,len(proc_na)):     #Luego de cumplir el NM, el programa se queda buscando si hay algún proceso remanente
-                    if proc_na[r].ta == self.instante:
-                        remanentes.append(proc_na[r])
+        for p in range(0,len(cola_all_process)):
+            if (len(cola_listos_susp) + len(cola_memoria)) == 5: # NIVEL DE MULTIPROGRAMACIÓN
+                for r in range(p,len(cola_all_process)):     #Luego de cumplir el NM, el programa se queda buscando si hay algún proceso remanente
+                    if cola_all_process[r].ta == self.instante:
+                        if cola_all_process[r] not in cola_nuevos:
+                            cola_nuevos.append(cola_all_process[r])
                 break                 # Si se supera el nivel de multiprogramación, no se cargan más procesos a la cola de nuevos
-            if len(remanentes) > 0:
-                cola_nuevos.append(remanentes.pop(0))
-            elif proc_na[p].ta == self.instante: #Si el instante actual coincide con un TA de un proceso, se lo carga a la cola
-                cola_nuevos.append(proc_na[p])
-                proc_na[p].ta = -1
+            if len(cola_nuevos) > 0:
+                r = cola_nuevos[0]
+                cola_nuevos.pop(0)
+                cola_listos_susp.append(r)
+            elif cola_all_process[p].ta == self.instante: #Si el instante actual coincide con un TA de un proceso, se lo carga a la cola
+                cola_listos_susp.append(cola_all_process[p])
+                cola_all_process[p].ta = -1
 
     def PlanificadorMP(self, proceso):
-        global cola_nuevos
+        global cola_listos_susp
         global cola_memoria
         global memoria
 
-        cola_nuevos.remove(proceso)  #Sale de la cola de nuevos (listos y suspendidos) el proceso a cargar en memoria
+        cola_listos_susp.remove(proceso)  #Sale de la cola de nuevos (listos y suspendidos) el proceso a cargar en memoria
         
         id_c = memoria.particiones[1].idProcAsig  #Se guarda el id del proceso que estaba antes en la partición seleccionada
         fragin = memoria.particiones[1].tamano - proceso.tamano
@@ -183,73 +197,192 @@ class SistemaOperativo:
 
         cola_memoria.remove(cambiar)  #Sacamos de la cola_memoria el proceso que va a ser reemplazado
         cola_memoria.append(proceso)    #Ponemos en memoria el proceso que se tiene que ejecutar
-        cola_nuevos.append(cambiar)     #Ponemos en la cola de nuevos (listos y suspendidos) el proceso que sufrió el swap-out
+        cola_listos_susp.append(cambiar)     #Ponemos en la cola de nuevos (listos y suspendidos) el proceso que sufrió el swap-out
 
         memoria.particiones[1].asignarProceso(proceso, fragin)  #Se hace el swap-in del proceso a ejecutar
         
     
     def OrdenarSJF(self):
-        global cola_listos
+        global cola_plan_ejec
         global cola_memoria
-        global cola_nuevos
+        global cola_listos_susp
 
-        cola_listos = cola_nuevos + cola_memoria
-        for i in range(1,len(cola_listos)):
-            clave = cola_listos[i]
-            j = i-1
-            while (j >= 0 and cola_listos[j].ti > clave.ti):
-                cola_listos[j+1] = cola_listos[j]
-                j = j-1
-            cola_listos[j+1] = clave
+        cola_plan_ejec = cola_listos_susp + cola_memoria
+        if len(cola_plan_ejec) > 0:
+            for i in range(1,len(cola_plan_ejec)):
+                clave = cola_plan_ejec[i]
+                j = i-1
+                while (j >= 0 and cola_plan_ejec[j].ti > clave.ti):
+                    cola_plan_ejec[j+1] = cola_plan_ejec[j]
+                    j = j-1
+                cola_plan_ejec[j+1] = clave
 
     def controlarEjecucion(self):
-        global cola_nuevos
+        global cola_listos_susp
         global cola_memoria
-        global cola_listos
+        global cola_plan_ejec
         global memoria
+        global cola_all_process
+
+        '''for i in cola_all_process:
+            print('sj')
+            if i.ta != -1:
+                return(False)'''
 
         if memoria.particiones[1].Disponible() and memoria.particiones[2].Disponible() and memoria.particiones[3].Disponible():
-            if len(cola_listos) <= 0 and len(cola_memoria) <= 0 and len(cola_nuevos) <= 0:
+            if len(cola_plan_ejec) <= 0 and len(cola_memoria) <= 0 and len(cola_listos_susp) <= 0:
                 return(True)
         else:
             return(False)
 
-    def imprimirEvento(self):
-        global cola_listos
+    def obtenerEvento(self):
+        global cola_plan_ejec
         global cola_memoria
-        global cola_nuevos
+        global cola_listos_susp
         global memoria
         global cpu
-        global proc_na
+        global cola_all_process
+        global cola_nuevos
 
-        print('ESTADOS DE LOS PROCESOS:')
-        print(f'EJECUTANDOSE: \n P{cpu.proc_ejec}')
-        print('LISTOS:')
-        listos = f'P{cola_memoria[0].idProceso}'
-        for p in range(1,len(cola_memoria)):
-            listos = listos + f', P{cola_memoria[p].idProceso}'
-        print(listos)
-        print('LISTOS Y SUSPENDIDOS:')
-        for p in cola_nuevos:
-            print(f"P{p.idProceso}")
-        print('NUEVOS:')
-        for p in proc_na:
-            if p not in cola_memoria and p not in cola_nuevos:
-                print(f"P{p.idProceso}")
+        global OE_instante
+        global OE_proceso_ejec
+        global OE_procesos_listos
+        global OE_procesos_listos_susp
+        global OE_procesos_nuevos
+        global OE_procesos_sin_arribar
+        global OE_procesos_terminados
 
-        n = input('PRESIONE ENTER PARA CONTINUAR')
+        OE_instante = self.instante
+        
+        #OE_proceso_ejec
+        if cpu.proc_ejec != None:
+            OE_proceso_ejec = cpu.proc_ejec
+        else:
+            OE_proceso_ejec = None
 
-        #Después de mostrar todos los estados de los procesos, vendría la memoria con las particiones
+        #OE_procesos_listos
+        OE_procesos_listos = []
+        if cola_memoria != []:
+            for p in range(0,len(cola_memoria)):
+                if cola_memoria[p] != cpu.proc_ejec:
+                    OE_procesos_listos.append(cola_memoria[p])
+        
+        #OE_procesos_listos_susp
+        OE_procesos_listos_susp = []
+        if cola_listos_susp != []:
+            for p in cola_listos_susp:
+                OE_procesos_listos_susp.append(p)
+        
+        #OE_procesos_nuevos
+        OE_procesos_nuevos = []
+        if cola_nuevos != []:    
+            for p in cola_nuevos:
+                OE_procesos_nuevos.append(p)
 
+        #OE_procesos_sin_arribar
+        OE_procesos_sin_arribar = []
+        if cola_all_process != []:
+            for p in cola_all_process: 
+                if p not in cola_memoria and p not in cola_listos_susp and p not in cola_nuevos and p not in proc_terminados:
+                    OE_procesos_sin_arribar.append(p)
+
+        #OE_procesos_terminados
+        OE_procesos_terminados = []
+        if proc_terminados != []:
+            for p in proc_terminados: 
+                OE_procesos_terminados.append(p)
+
+    def imprimirEventoConsola(self):
+        global OE_instante
+        global OE_proceso_ejec
+        global OE_procesos_listos
+        global OE_procesos_listos_susp
+        global OE_procesos_nuevos
+        global OE_procesos_sin_arribar
+        global OE_procesos_terminados
+        global memoria
+
+        print(f'INSTANTE: {OE_instante}')
+        
+        print(f'ESTADOS DE LOS PROCESOS:')
+        
+        print(' - EJECUTANDOSE: ', end='')
+        if OE_proceso_ejec == None:
+            print('No hay procesos ejecutandose')
+        else: 
+            print(f'P{OE_proceso_ejec.idProceso}')
+        
+        print(' - LISTOS: ', end='')
+        if OE_procesos_listos != []:
+            print(f'P{OE_procesos_listos[0].idProceso}', end='')
+            for p in range(1,len(OE_procesos_listos)):
+                if OE_procesos_listos[p] != cpu.proc_ejec:
+                    print(f', P{OE_procesos_listos[p].idProceso}', end='')
+
+        print('\n - LISTOS Y SUSPENDIDOS: ', end='')
+        if OE_procesos_listos_susp != []:
+            print(f'P{OE_procesos_listos_susp[0].idProceso}', end='')
+            for p in range(1,len(OE_procesos_listos_susp)):
+                print(f', P{OE_procesos_listos_susp[p].idProceso}', end='')
+        
+        print('\n - NO ADMITIDOS: ', end='') 
+        if OE_procesos_nuevos != []:    
+            print(f'P{OE_procesos_nuevos[0].idProceso}', end='')
+            for p in range(1,len(OE_procesos_nuevos)):
+                print(f', P{OE_procesos_nuevos[p].idProceso}', end='')
+
+        print('\n - SIN ARRIBAR: ', end='') 
+        if OE_procesos_sin_arribar != []:
+            print(f'P{OE_procesos_sin_arribar[0].idProceso}', end='')
+            for p in range(1,len(OE_procesos_sin_arribar)):
+                print(f', P{OE_procesos_sin_arribar[p].idProceso}', end='')
+
+        print('\n - TERMINADOS: ', end='') 
+        if OE_procesos_terminados != []:
+            print(f'P{OE_procesos_terminados[0].idProceso}', end='')
+            for p in range(1,len(OE_procesos_terminados)):
+                print(f', P{OE_procesos_terminados[p].idProceso}', end='')
+
+        particiones = []
+        fragmentaciones = []
+        for p in range(1,len(memoria.particiones)):
+            if memoria.particiones[p].idProcAsig == None:
+                particiones.append('-')
+                if memoria.particiones[p].fe:
+                    fragmentaciones.append(f'FE: {memoria.particiones[p].tamano} KB')
+                else:
+                    fragmentaciones.append('Espacio Libre')
+            else:
+                particiones.append(f'P{memoria.particiones[p].idProcAsig}({memoria.particiones[p].tamano - memoria.particiones[p].fi} KB)')
+                fragmentaciones.append(f'FI: {memoria.particiones[p].fi} KB')
+
+        print('\n')
+        tabla_memoria=[['PARTICIÓN', 'CONTENIDO', 'TAMAÑO PARTICIÓN', 'FI/FE/EL'],
+                       [0, 'Sistema operativo', f'{memoria.particiones[0].tamano} KB', 'FI: 0 KB'],
+                       [1, particiones[0], f'{memoria.particiones[1].tamano} KB', fragmentaciones[0]],
+                       [2, particiones[1], f'{memoria.particiones[2].tamano} KB', fragmentaciones[1]],
+                       [3, particiones[2], f'{memoria.particiones[3].tamano} KB', fragmentaciones[2]]]
+
+        print(tabulate(tabla_memoria, tablefmt='fancy_grid', stralign='center'))
+
+        n = input('\n\nPRESIONE ENTER PARA CONTINUAR \n')
 
     def GestorAsignacionMemoria(self):
+        global cola_listos_susp
+        global cola_memoria #Acá están los procesos cargados en memoria
+        global cola_plan_ejec
+        global cola_all_process
         global cola_nuevos
-        global cola_memoria
-        global cola_listos
-        global proc_na
-        global remanentes
         global memoria
         global cpu
+        global proc_terminados
+        global OE_instante
+        global OE_proceso_ejec
+        global OE_procesos_listos
+        global OE_procesos_listos_susp
+        global OE_procesos_nuevos
+        global OE_procesos_sin_arribar
+        global OE_procesos_terminados
 
         part1 = Particion(1, 101, 250, None, None, False)
         part2 = Particion(2, 251, 120, None, None, False)
@@ -260,21 +393,33 @@ class SistemaOperativo:
         memoria.setParticiones(part2)
         memoria.setParticiones(part3)
         cpu = CPU(None)
-        proc_na = leerArchivo()  #Procesos que no existen todavía en el SO
-        cola_nuevos = []
+        cola_all_process = leerArchivo()  #Procesos que no existen todavía en el SO ; NO ADMITIDO <> NO ARRIBADO
+        cola_listos_susp = []
         cola_memoria = []  #Acá se guarda el PCB de los procesos que están en MP
-        cola_listos = []    #Acá están los de la cola_nuevos y cola_memoria ordenados según SJF
-        remanentes = []     #Procesos que cumplían con el instante actual del SO pero que no pudieron ingresar al sistema por el nivel de multiprogramación
+        cola_plan_ejec = []    #Acá están los de la cola_listos_susp y cola_memoria ordenados según SJF
+        cola_nuevos = []     #Procesos que cumplían con el instante actual del SO pero que no pudieron ingresar al sistema por el nivel de multiprogramación
+        proc_terminados = []
         fin_asignacion = False
-
+        OE_instante = so.instante
+        OE_proceso_ejec = None
+        OE_procesos_listos = []
+        OE_procesos_listos_susp = []
+        OE_procesos_nuevos = []
+        OE_procesos_sin_arribar = cola_all_process
+        OE_procesos_terminados = []
+        
+        so.imprimirEventoConsola()
+        so.incrementarInstante()
         while[True]:
             so.PlanificadorLP()
             memoria.asignarParticion()
             so.OrdenarSJF()   #Este método sería el PlanificadorCP
             cpu.ejecutar()
-            so.incrementarInstante()
+            if cpu.proc_ejec != None:
+                so.incrementarInstante()
             fin_asignacion = so.controlarEjecucion()
             if fin_asignacion:
+                so.imprimirEventoConsola()
                 break
 
 def leerArchivo():

@@ -46,9 +46,19 @@ lista[0].ejecutar()
 #print(lista)
 #print(listeta)
 print(proc1)"""
-lista=[]
+""" lista=[]
 liju=[9,'o']
 for i in lista:
     liju.remove(lista)
     print('hola')
-print(len(lista))
+print(len(lista)) """
+
+from tabulate import tabulate
+
+rios3 = [['ID PARTICIÓN', 'CONTENIDO', 'TAMAÑO PARTICIÓN', 'FI'],
+         [0, 'SISTEMA OPERATIVO', 100, 0],
+         [1, 'P4', 140, 30],
+         [2, 'P7', 154, 0],
+         [3, 'P6', 51, 150]]
+
+print(tabulate(rios3, tablefmt='fancy_grid', stralign='center'))
